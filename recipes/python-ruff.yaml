@@ -1,0 +1,54 @@
+apiVersion: poultice.dev/v1
+kind: Recipe
+
+metadata:
+  name: python-ruff
+  ecosystem: python
+  summary: >
+    Apply ruff's safe autofixes, then let an AI strategy attempt only what ruff
+    declined to fix automatically. Both are gated on the test suite.
+
+detect:
+  files:
+    - "**/*.py"
+  requires:
+    - ruff
+
+diagnose:
+  run: ruff check --output-format json .
+  parse: ruff-json
+  # ruff exits 1 when it finds anything, which is a result and not a failure.
+  expectNonZeroExit: true
+  timeoutSeconds: 300
+
+fix:
+  # Deterministic first: ruff fixes the large majority for free.
+  - strategy: native
+    name: ruff-safe-fixes
+    run: ruff check --fix .
+    timeoutSeconds: 300
+
+  # Only the tail reaches the model, and only inside a tight blast radius.
+  - strategy: ai
+    name: ruff-residual
+    maxAttempts: 2
+    context:
+      include:
+        - "**/*.py"
+      maxBytes: 40000
+    policy:
+      allowPaths:
+        - "**/*.py"
+      denyPaths:
+        - "**/migrations/**"
+        - "**/conftest.py"
+      maxChangedFiles: 5
+      maxChangedLines: 200
+
+verify:
+  - name: import-check
+    run: python -m compileall -q .
+    timeoutSeconds: 300
+  - name: test
+    run: python -m pytest -q
+    timeoutSeconds: 1800

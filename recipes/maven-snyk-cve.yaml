@@ -1,0 +1,54 @@
+apiVersion: poultice.dev/v1
+kind: Recipe
+
+metadata:
+  name: maven-snyk-cve
+  ecosystem: java
+  summary: >
+    Remediate Snyk-reported CVEs in Maven projects. Snyk's own fixer runs first;
+    an AI strategy handles only the dependencies Snyk reports as neither
+    upgradable nor patchable. Every change must survive a full compile and test.
+
+detect:
+  files:
+    - "**/pom.xml"
+  requires:
+    - mvn
+    - snyk
+
+diagnose:
+  # $POULTICE_OUT is provided by the engine: a temp path the parser will read.
+  # Snyk exits non-zero when it finds vulnerabilities, which is the normal case.
+  run: snyk test --all-projects --json-file-output=$POULTICE_OUT
+  parse: snyk-json
+  expectNonZeroExit: true
+  timeoutSeconds: 1800
+
+fix:
+  - strategy: native
+    name: snyk-fix
+    run: snyk fix --all-projects
+    timeoutSeconds: 1800
+
+  - strategy: ai
+    name: unfixable-dependency-bumps
+    maxAttempts: 2
+    context:
+      include:
+        - "**/pom.xml"
+      maxBytes: 60000
+    policy:
+      # A dependency CVE is fixed by editing a pom, never by editing sources.
+      # Anything else the model proposes is out of scope and gets rejected.
+      allowPaths:
+        - "**/pom.xml"
+      maxChangedFiles: 10
+      maxChangedLines: 200
+
+verify:
+  - name: compile
+    run: mvn -B -q clean install -DskipTests
+    timeoutSeconds: 2400
+  - name: test
+    run: mvn -B test
+    timeoutSeconds: 3600

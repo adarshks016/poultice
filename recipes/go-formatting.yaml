@@ -1,0 +1,40 @@
+apiVersion: poultice.dev/v1
+kind: Recipe
+
+metadata:
+  name: go-formatting
+  ecosystem: go
+  summary: >
+    Reformat Go sources with gofmt, then prove the package still builds and its
+    tests still pass before keeping the change.
+
+detect:
+  files:
+    - "**/*.go"
+    - go.mod
+  requires:
+    - go
+    - gofmt
+
+diagnose:
+  # gofmt -l prints one unformatted file per line and exits zero either way.
+  run: gofmt -l .
+  parse: gofmt-list
+  timeoutSeconds: 120
+
+fix:
+  - strategy: native
+    name: gofmt-write
+    run: gofmt -w .
+    timeoutSeconds: 120
+
+# Formatting is close to risk-free, which is exactly why it makes a good first
+# recipe: if the verify gate ever rejects a gofmt run, something is wrong with
+# the gate and you want to find that out cheaply.
+verify:
+  - name: build
+    run: go build ./...
+    timeoutSeconds: 600
+  - name: test
+    run: go test ./...
+    timeoutSeconds: 900

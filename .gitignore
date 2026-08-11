@@ -1,0 +1,15 @@
+# Build artifacts
+/bin/
+coverage.out
+*.test
+
+# Poultice run outputs
+snyk-*.json
+poultice-report.json
+pr-body.md
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

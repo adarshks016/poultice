@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: CI only needs to read the code.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.22', '1.23']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: gofmt
+        run: make fmtcheck
+
+      - name: vet
+        run: make vet
+
+      - name: test
+        run: go test -race ./...
+
+      - name: validate shipped recipes
+        run: make validate-recipes
+
+  dogfood:
+    name: poultice heals poultice
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: check
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: build
+        run: make build
+
+      # The tool is run against its own repository with no model and no
+      # credentials. A clean run exits 0; anything it could fix but has not
+      # exits non-zero and fails this job.
+      - name: heal (deterministic only)
+        run: ./bin/poultice heal --severity low --no-ai
