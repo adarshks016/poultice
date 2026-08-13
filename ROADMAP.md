@@ -5,7 +5,8 @@ native fixers, findings are re-diagnosed, and changes are kept only when a
 verifier passes — otherwise the working tree and `HEAD` are rolled back
 byte-for-byte. The **AI** path is fully plumbed through the engine (the
 `strategy.Patcher` interface, context collection, `git apply --check`, policy
-enforcement, bounded retries) but has no provider yet, so it reports
+enforcement, bounded retries). Its first provider — Anthropic (Claude) — is now
+implemented; without a key, or with `--no-ai`, it still reports
 `skipped: no AI provider configured`.
 
 This document tracks what comes next.
@@ -14,15 +15,17 @@ This document tracks what comes next.
 
 The headline feature. Everything else is polish on top of a working tool.
 
-- [ ] `internal/strategy/anthropic.go` — a `Patcher` backed by the Claude API.
-      Reads `ANTHROPIC_API_KEY`, sends a `PatchRequest` (outstanding findings +
-      trimmed file contents + policy) and parses a unified diff back. The
-      interface in `internal/strategy/strategy.go` is already sized for this.
-- [ ] Provider selection in `cmd/poultice` (`--ai-provider`), defaulting to
-      `Disabled` so `--no-ai` and no-credential runs stay unchanged.
-- [ ] Golden-file tests using a fake `Patcher` that returns canned diffs, so the
-      engine's apply / verify / rollback of AI patches is proven without any
-      network call.
+- [x] `internal/strategy/anthropic.go` — a `Patcher` backed by the Claude
+      Messages API. Reads `ANTHROPIC_API_KEY`, sends a `PatchRequest`
+      (outstanding findings + trimmed file contents + policy) and parses a
+      unified diff back. Standard-library only.
+- [x] Provider selection in `cmd/poultice`, auto-enabled from the environment
+      and defaulting to `Disabled` so `--no-ai` and no-credential runs stay
+      unchanged.
+- [x] Provider tests over `httptest` — request shape, diff extraction, API-error
+      surfacing, and the env fallback — with no network access.
+- [ ] Engine-level golden test using a fake `Patcher` returning canned diffs, to
+      pin the apply / verify / rollback path end-to-end.
 
 ## Phase 2 — Prove it on real repositories
 

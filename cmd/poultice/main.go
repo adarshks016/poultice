@@ -18,6 +18,7 @@ import (
 	"github.com/adarshks016/poultice/internal/parse"
 	"github.com/adarshks016/poultice/internal/recipe"
 	"github.com/adarshks016/poultice/internal/report"
+	"github.com/adarshks016/poultice/internal/strategy"
 )
 
 // version is overridden at build time via -ldflags.
@@ -151,11 +152,25 @@ func cmdHeal(ctx context.Context, cfg config, diagnoseOnly bool) error {
 		return fmt.Errorf("invalid --severity %q (want low|medium|high|critical)", cfg.severity)
 	}
 
+	// Select the AI provider. Absent credentials (or --no-ai) leaves the engine
+	// with its Disabled patcher, so the AI path reports "skipped" rather than
+	// failing — the deterministic half runs identically either way.
+	var patcher strategy.Patcher = strategy.Disabled{}
+	if !cfg.noAI && !diagnoseOnly {
+		if p, ok := strategy.NewAnthropicFromEnv(); ok {
+			patcher = p
+			if !cfg.asJSON {
+				fmt.Fprintf(os.Stderr, "  ai: using %s\n", p.Name())
+			}
+		}
+	}
+
 	eng := engine.New(engine.Options{
 		RepoDir:  cfg.dir,
 		Severity: sev,
 		DryRun:   cfg.dryRun || diagnoseOnly,
 		NoAI:     cfg.noAI,
+		Patcher:  patcher,
 		Log: func(format string, args ...any) {
 			if !cfg.asJSON {
 				fmt.Fprintf(os.Stderr, "  "+format+"\n", args...)

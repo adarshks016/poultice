@@ -165,16 +165,23 @@ These are tested, not aspirational — see
 
 ## Status
 
-**v0.0.1 — walking skeleton.** The engine, recipe schema, policy enforcement,
-parsers, rollback and reporting are implemented and tested. The AI strategy path
-is fully wired through the engine — context collection, patch validation, policy
-checks, bounded retries — behind the `strategy.Patcher` interface, but no
-provider is implemented yet, so it reports `skipped: no AI provider configured`.
-That is the next commit; see the roadmap.
+**v0.0.1.** The engine, recipe schema, policy enforcement, parsers, rollback and
+reporting are implemented and tested. The AI strategy path is fully wired through
+the engine — context collection, patch validation, policy checks, bounded
+retries — behind the `strategy.Patcher` interface.
+
+The first provider, **Anthropic (Claude)**, is now implemented. Set
+`ANTHROPIC_API_KEY` and `heal` will ask the model for a unified diff when native
+strategies leave findings behind; every generated patch still passes through
+`git apply --check`, policy, and verification before it can survive. Without a
+key — or with `--no-ai` — the AI path reports `skipped: no AI provider configured`
+and the deterministic half runs unchanged. Optional overrides:
+`POULTICE_AI_MODEL` (default `claude-sonnet-5`) and `ANTHROPIC_BASE_URL`.
 
 ### Roadmap
 
-- [ ] `strategy.Patcher` implementations: OpenAI-compatible, Anthropic, Ollama
+- [x] `strategy.Patcher` implementation: Anthropic (Claude)
+- [ ] Further `strategy.Patcher` implementations: OpenAI-compatible, Ollama
 - [ ] `poultice pr` — open the pull request directly, draft when unverified
 - [ ] SARIF output for GitHub code scanning ingestion
 - [ ] GitHub Action wrapper (`action.yml`) and a GitLab CI template

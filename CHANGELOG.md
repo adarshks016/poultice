@@ -8,7 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Anthropic (Claude) `strategy.Patcher` implementation
+  (`internal/strategy/anthropic.go`): the AI path now proposes real unified
+  diffs via the Claude Messages API when `ANTHROPIC_API_KEY` is set. Configurable
+  with `POULTICE_AI_MODEL` (default `claude-sonnet-5`) and `ANTHROPIC_BASE_URL`.
+  Standard-library only — no new dependencies. Every generated patch still passes
+  `git apply --check`, policy, and verification before it can survive.
 - `ROADMAP.md` describing the path to 1.0.
+
+### Changed
+- `poultice heal` selects the Anthropic provider automatically when a key is
+  present; `--no-ai` and unauthenticated runs are unchanged.
 
 ## [0.0.1] - 2026-08-11
 
