@@ -24,8 +24,9 @@ The headline feature. Everything else is polish on top of a working tool.
       unchanged.
 - [x] Provider tests over `httptest` — request shape, diff extraction, API-error
       surfacing, and the env fallback — with no network access.
-- [ ] Engine-level golden test using a fake `Patcher` returning canned diffs, to
-      pin the apply / verify / rollback path end-to-end.
+- [x] Engine-level golden tests using a fake `Patcher`: accept on verify-pass,
+      rollback on verify-fail, bounded retry (fail→succeed), and skip when not
+      configured — all against a real git repo, no network.
 
 ## Phase 2 — Prove it on real repositories
 

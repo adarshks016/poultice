@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Engine-level golden tests for the AI path (`internal/engine/engine_ai_test.go`):
+  accept on verify-pass, rollback on verify-fail, bounded retry (fail then
+  succeed), and not-configured skip — all exercised against a real git repo in a
+  temp directory with a `fakePatcher` standing in for any live model.
 - Anthropic (Claude) `strategy.Patcher` implementation
   (`internal/strategy/anthropic.go`): the AI path now proposes real unified
   diffs via the Claude Messages API when `ANTHROPIC_API_KEY` is set. Configurable
