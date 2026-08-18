@@ -1,0 +1,68 @@
+apiVersion: poultice.dev/v1
+kind: Recipe
+
+metadata:
+  name: go-vuln
+  ecosystem: go
+  summary: >
+    Scan Go modules for known vulnerabilities with govulncheck, attempt to
+    upgrade affected dependencies, and only keep the changes if the module
+    still builds and its tests still pass.
+
+detect:
+  files:
+    - go.mod
+  requires:
+    - go
+    - govulncheck
+
+diagnose:
+  # -json emits one envelope per line: "osv" lines carry advisory detail,
+  # "finding" lines carry call-stack traces. The govulncheck-json parser
+  # correlates them and drops no-trace entries (reachability warnings that
+  # never reach a vulnerable symbol).
+  run: govulncheck -json ./...
+  parse: govulncheck-json
+  expectNonZeroExit: true   # govulncheck exits 3 when vulnerabilities are found
+  timeoutSeconds: 180
+
+fix:
+  # go get -u upgrades every direct dependency that has a known-safe version.
+  # govulncheck itself tells you which packages need updating, but 'go get'
+  # with no arguments is the idiomatic way to apply those upgrades across the
+  # whole module graph. Tidy ensures go.sum stays consistent.
+  - strategy: native
+    name: go-get-u
+    run: go get -u ./... && go mod tidy
+    timeoutSeconds: 300
+
+  # When native upgrades leave findings behind — typically because the fix
+  # requires a major-version bump that 'go get -u' will not make automatically —
+  # ask the AI to edit go.mod and any import paths that need updating.
+  - strategy: ai
+    name: llm-dep-bump
+    maxAttempts: 2
+    context:
+      include:
+        - "go.mod"
+        - "go.sum"
+        - "**/*.go"
+      maxBytes: 80000
+    policy:
+      allowPaths:
+        - "go.mod"
+        - "go.sum"
+        - "**/*.go"
+      denyPaths:
+        - ".github/**"
+        - "Makefile"
+      maxChangedFiles: 10
+      maxChangedLines: 200
+
+verify:
+  - name: build
+    run: go build ./...
+    timeoutSeconds: 600
+  - name: test
+    run: go test ./...
+    timeoutSeconds: 900
