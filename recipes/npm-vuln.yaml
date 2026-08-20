@@ -1,0 +1,75 @@
+apiVersion: poultice.dev/v1
+kind: Recipe
+
+metadata:
+  name: npm-vuln
+  ecosystem: node
+  summary: >
+    Scan npm packages for known vulnerabilities with 'npm audit', attempt to
+    fix them automatically, and only keep the changes if the package still
+    builds and its tests still pass.
+
+detect:
+  files:
+    - package.json
+    - package-lock.json
+  requires:
+    - npm
+
+diagnose:
+  # npm audit --json exits non-zero when vulnerabilities are found.
+  # The npm-audit-json parser handles both npm 6 (advisories map) and
+  # npm 7+ (vulnerabilities map) output shapes.
+  run: npm audit --json
+  parse: npm-audit-json
+  expectNonZeroExit: true
+  timeoutSeconds: 120
+
+fix:
+  # npm audit fix upgrades vulnerable packages to the nearest non-breaking
+  # safe version. --force allows semver-major bumps when no minor fix exists,
+  # but only if the recipe author opts in — omit it here to keep changes
+  # conservative and reviewable.
+  - strategy: native
+    name: npm-audit-fix
+    run: npm audit fix
+    timeoutSeconds: 300
+
+  # When a vulnerability has no automatic fix (e.g. no patched version yet, or
+  # a major-version bump that changes the import API), ask the AI to update the
+  # relevant code to use a safe alternative package.
+  - strategy: ai
+    name: llm-dep-fix
+    maxAttempts: 2
+    context:
+      include:
+        - "package.json"
+        - "package-lock.json"
+        - "**/*.js"
+        - "**/*.ts"
+        - "**/*.mjs"
+        - "**/*.cjs"
+      maxBytes: 80000
+    policy:
+      allowPaths:
+        - "package.json"
+        - "package-lock.json"
+        - "**/*.js"
+        - "**/*.ts"
+        - "**/*.mjs"
+        - "**/*.cjs"
+      denyPaths:
+        - ".github/**"
+        - "**/*.min.js"
+        - "**/dist/**"
+        - "**/build/**"
+      maxChangedFiles: 10
+      maxChangedLines: 200
+
+verify:
+  - name: build
+    run: npm run build --if-present
+    timeoutSeconds: 300
+  - name: test
+    run: npm test --if-present
+    timeoutSeconds: 600
