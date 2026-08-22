@@ -1,0 +1,72 @@
+apiVersion: poultice.dev/v1
+kind: Recipe
+
+metadata:
+  name: semgrep
+  ecosystem: multi
+  summary: >
+    Run semgrep SAST rules across the repository, then ask the AI to fix any
+    findings that remain after triage. Only changes that pass the verify gate
+    are kept; everything else is rolled back.
+
+detect:
+  files:
+    # Semgrep works across languages; detect if any source is present.
+    - "**/*.py"
+    - "**/*.js"
+    - "**/*.ts"
+    - "**/*.go"
+    - "**/*.java"
+  requires:
+    - semgrep
+
+diagnose:
+  # --config auto pulls the Semgrep Registry ruleset for the detected languages.
+  # Replace with a local config path (--config ./semgrep-rules/) when you need
+  # reproducible, registry-independent scans.
+  run: semgrep --config auto --json .
+  parse: semgrep-json
+  expectNonZeroExit: true   # semgrep exits 1 when findings are present
+  timeoutSeconds: 300
+
+fix:
+  # Semgrep has no built-in fixer for most rules, so the AI path is the primary
+  # strategy here. The native step is a placeholder that runs semgrep's own
+  # --autofix flag, which only applies to rules that declare a fix pattern.
+  - strategy: native
+    name: semgrep-autofix
+    run: semgrep --config auto --autofix .
+    timeoutSeconds: 300
+
+  - strategy: ai
+    name: llm-fix
+    maxAttempts: 2
+    context:
+      include:
+        - "**/*.py"
+        - "**/*.js"
+        - "**/*.ts"
+        - "**/*.go"
+        - "**/*.java"
+      maxBytes: 80000
+    policy:
+      allowPaths:
+        - "**/*.py"
+        - "**/*.js"
+        - "**/*.ts"
+        - "**/*.go"
+        - "**/*.java"
+      denyPaths:
+        - ".github/**"
+        - "**/vendor/**"
+        - "**/node_modules/**"
+        - "**/dist/**"
+        - "**/build/**"
+        - "**/*.min.js"
+      maxChangedFiles: 5
+      maxChangedLines: 150
+
+verify:
+  - name: semgrep-clean
+    run: semgrep --config auto --error .
+    timeoutSeconds: 300
