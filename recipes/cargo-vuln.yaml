@@ -1,0 +1,67 @@
+apiVersion: poultice.dev/v1
+kind: Recipe
+
+metadata:
+  name: cargo-vuln
+  ecosystem: rust
+  summary: >
+    Scan Rust crates for known vulnerabilities with cargo audit, attempt to
+    upgrade affected dependencies with cargo update, and only keep the changes
+    if the workspace still compiles and its tests still pass.
+
+detect:
+  files:
+    - Cargo.toml
+    - Cargo.lock
+  requires:
+    - cargo
+    - cargo-audit
+
+diagnose:
+  # cargo audit --json exits non-zero when vulnerabilities are found.
+  # The cargo-audit-json parser prefers versions.patched over advisory.patched
+  # and intentionally omits warnings (unmaintained, unsound crates).
+  run: cargo audit --json
+  parse: cargo-audit-json
+  expectNonZeroExit: true
+  timeoutSeconds: 120
+
+fix:
+  # cargo update bumps dependencies to the latest semver-compatible version,
+  # which is often enough to pull in a patched release. It does not cross
+  # major-version boundaries, keeping the change reviewable.
+  - strategy: native
+    name: cargo-update
+    run: cargo update
+    timeoutSeconds: 300
+
+  # When a vulnerability requires a major-version bump or a direct Cargo.toml
+  # edit (e.g. the crate was yanked entirely and a replacement is needed),
+  # ask the AI to make the precise change.
+  - strategy: ai
+    name: llm-dep-bump
+    maxAttempts: 2
+    context:
+      include:
+        - "Cargo.toml"
+        - "Cargo.lock"
+        - "**/Cargo.toml"
+      maxBytes: 60000
+    policy:
+      allowPaths:
+        - "Cargo.toml"
+        - "Cargo.lock"
+        - "**/Cargo.toml"
+      denyPaths:
+        - ".github/**"
+        - "**/target/**"
+      maxChangedFiles: 5
+      maxChangedLines: 100
+
+verify:
+  - name: build
+    run: cargo build --workspace
+    timeoutSeconds: 600
+  - name: test
+    run: cargo test --workspace
+    timeoutSeconds: 900
