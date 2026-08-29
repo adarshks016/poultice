@@ -1,0 +1,117 @@
+name: Poultice
+description: Diagnose and heal repository issues — only keep changes that a verifier can prove.
+author: adarshks016
+
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  recipe:
+    description: Run only this named recipe (default is all applicable).
+    required: false
+    default: ''
+  severity:
+    description: Minimum finding severity to act on (low|medium|high|critical).
+    required: false
+    default: high
+  no-ai:
+    description: Deterministic strategies only; never call a model.
+    required: false
+    default: 'false'
+  dry-run:
+    description: Diagnose and report findings; apply no changes.
+    required: false
+    default: 'false'
+  recipes-dir:
+    description: Path to the recipes directory relative to the workspace (default ./recipes).
+    required: false
+    default: ''
+  anthropic-api-key:
+    description: Anthropic API key that enables the AI fix path (Claude provider).
+    required: false
+    default: ''
+  go-version:
+    description: Minimum Go version used to install poultice.
+    required: false
+    default: '>=1.22'
+
+outputs:
+  outcome:
+    description: 'Healing outcome: clean | healed | partial | unverified | failed'
+    value: ${{ steps.heal.outputs.outcome }}
+  pr-body:
+    description: Markdown pull-request body summarising what was healed (empty when nothing changed).
+    value: ${{ steps.pr-body.outputs.text }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+
+    - name: Install poultice
+      shell: bash
+      run: go install github.com/adarshks016/poultice/cmd/poultice@latest
+
+    - name: Heal
+      id: heal
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+      run: |
+        args=(heal --severity "${{ inputs.severity }}")
+
+        [[ -n "${{ inputs.recipe }}" ]]      && args+=(--recipe "${{ inputs.recipe }}")
+        [[ -n "${{ inputs.recipes-dir }}" ]] && args+=(--recipes "${{ inputs.recipes-dir }}")
+        [[ "${{ inputs.no-ai }}"  == "true" ]] && args+=(--no-ai)
+        [[ "${{ inputs.dry-run }}" == "true" ]] && args+=(--dry-run)
+
+        json_file=$(mktemp)
+        pr_body_file=$(mktemp)
+        args+=(--json --pr-body "$pr_body_file")
+
+        set +e
+        poultice "${args[@]}" > "$json_file"
+        exit_code=$?
+        set -e
+
+        # Map exit code to a human-readable outcome string.
+        # Exit 0 covers both OutcomeClean and OutcomeHealed; parse the JSON to
+        # distinguish them when the report is available.
+        case $exit_code in
+          0)
+            outcome=$(python3 -c \
+              "import json,sys; d=json.load(open('$json_file')); print(d.get('outcome','clean'))" \
+              2>/dev/null || echo "clean")
+            ;;
+          2) outcome="partial"    ;;
+          3) outcome="unverified" ;;
+          *) outcome="failed"     ;;
+        esac
+
+        echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+
+        # Stash the PR body path for the next step.
+        echo "pr_body_file=$pr_body_file" >> "$GITHUB_ENV"
+
+        rm -f "$json_file"
+        exit $exit_code
+
+    - name: Collect PR body
+      id: pr-body
+      if: always()
+      shell: bash
+      run: |
+        if [[ -s "$pr_body_file" ]]; then
+          {
+            echo "text<<POULTICE_EOF"
+            cat "$pr_body_file"
+            echo "POULTICE_EOF"
+          } >> "$GITHUB_OUTPUT"
+        else
+          echo "text=" >> "$GITHUB_OUTPUT"
+        fi
+        rm -f "$pr_body_file"
