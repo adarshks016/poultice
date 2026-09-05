@@ -1,0 +1,80 @@
+version: 2
+
+project_name: poultice
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/poultice
+    binary: poultice
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - id: default
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: '{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}'
+    files:
+      - README.md
+      - LICENSE
+      - NOTICE
+      - recipes/**
+
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_checksums.txt'
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^chore:'
+      - '^ci:'
+      - '^docs?:'
+      - '^test:'
+      - '^refactor:'
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^feat'
+      order: 0
+    - title: Bug fixes
+      regexp: '^fix'
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  github:
+    owner: adarshks016
+    name: poultice
+  draft: false
+  prerelease: auto
+  name_template: '{{ .ProjectName }} {{ .Tag }}'
+  footer: |
+    ## Install
+
+    ```bash
+    go install github.com/adarshks016/poultice/cmd/poultice@{{ .Tag }}
+    ```
+
+    Or download a pre-built binary from the assets above and place it on your `$PATH`.
