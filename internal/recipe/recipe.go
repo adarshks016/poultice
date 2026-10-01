@@ -11,6 +11,7 @@ package recipe
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -284,9 +285,15 @@ func decodeRecipe(root *yaml.Reader) *Recipe {
 // It returns all successfully loaded recipes together with any load errors, so
 // that one malformed recipe does not hide the rest.
 func LoadDir(dir string) ([]*Recipe, []error) {
-	entries, err := os.ReadDir(dir)
+	return LoadFS(os.DirFS(dir), dir)
+}
+
+// LoadFS is LoadDir over any filesystem, such as the embedded built-in
+// library. label prefixes file names in error messages.
+func LoadFS(fsys fs.FS, label string) ([]*Recipe, []error) {
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
-		return nil, []error{fmt.Errorf("read recipe dir: %w", err)}
+		return nil, []error{fmt.Errorf("read recipe dir %s: %w", label, err)}
 	}
 	var (
 		out  []*Recipe
@@ -300,7 +307,13 @@ func LoadDir(dir string) ([]*Recipe, []error) {
 		if ext != ".yaml" && ext != ".yml" {
 			continue
 		}
-		r, err := Load(filepath.Join(dir, e.Name()))
+		path := filepath.Join(label, e.Name())
+		raw, err := fs.ReadFile(fsys, e.Name())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read recipe: %w", err))
+			continue
+		}
+		r, err := Parse(raw, path)
 		if err != nil {
 			errs = append(errs, err)
 			continue

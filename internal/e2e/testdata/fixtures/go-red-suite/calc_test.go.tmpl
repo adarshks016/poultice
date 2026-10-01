@@ -1,0 +1,11 @@
+package calc
+
+import "testing"
+
+// The suite is already red. Formatting cannot fix it, so no formatting change
+// can be verified, and poultice must keep none of it.
+func TestAddSaturates(t *testing.T) {
+	if got := Add(1<<62, 1<<62); got < 0 {
+		t.Fatalf("Add overflowed to %d; this test expects a saturating Add", got)
+	}
+}

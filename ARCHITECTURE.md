@@ -13,10 +13,11 @@ it is protecting that invariant. It usually is.
 ## Package map
 
 ```
-cmd/poultice          CLI: heal, diagnose, recipes, validate
+cmd/poultice          CLI: heal, diagnose, recipes, validate, init
 internal/
   model               Finding, Verdict, Outcome — the shared vocabulary
   yaml                minimal YAML subset decoder (zero third-party deps)
+  config              .poultice.yaml: per-repository defaults under the flags
   recipe              recipe loading, schema validation, defaults
   parse               tool output → model.Findings, via a registry
   exec                subprocess runner: timeouts, process groups, capped capture
@@ -26,7 +27,8 @@ internal/
   verify              runs verify steps, produces a Verdict
   engine              the state machine that wires all of the above together
   report              terminal, JSON and pull-request rendering
-recipes/              the built-in recipe library
+  e2e                 shipped recipes run against fixture repositories
+recipes/              the built-in recipe library, embedded into the binary
 ```
 
 Dependencies point inward: `engine` knows about everything, `model` knows about
@@ -77,16 +79,23 @@ nothing. `parse` and `strategy` are the two extension seams.
 Every strategy — native or AI — funnels through `engine.settle`, which does four
 things in this order:
 
-1. **Did anything change?** No changes means the strategy did nothing; nothing
-   to verify, nothing to commit.
+1. **Did anything change?** The strategy's work is staged first; the index is
+   now the exact snapshot every later step refers to. No changes means the
+   strategy did nothing; nothing to verify, nothing to commit.
 2. **Policy check.** Changed paths against allow/deny globs, file count and line
-   count against caps. A violation rolls back immediately and never runs the
-   (expensive) verifier.
+   count against caps. A rename counts against both its source and destination.
+   A violation rolls back immediately and never runs the (expensive) verifier.
 3. **Verify.** Every step in order, stopping at the first failure. Steps are
    ordered cheapest-first by convention, so a broken compile fails in seconds
    instead of after the full test suite.
-4. **Checkpoint or roll back.** Pass → an ordinary git commit, so the branch
-   reads as reviewable history. Fail → `git reset --hard HEAD` and `git clean -fd`.
+4. **Checkpoint or roll back.** Pass → the staged snapshot is committed as an
+   ordinary git commit, so the branch reads as reviewable history, and anything
+   the verifier wrote in the meantime is discarded. Fail → `git reset --hard
+   HEAD` and `git clean -fd`.
+
+Committing the staged snapshot, rather than whatever is in the working tree
+after verification, is what makes "policy checked it" and "it was committed"
+the same set of bytes.
 
 Because rollback always targets `HEAD`, and `HEAD` only advances on a passing
 verdict, `HEAD` *is* the last verified-green commit by construction. There is no
@@ -164,3 +173,10 @@ the tests have to check git.
 
 The single most important test is `TestFailedVerificationRollsBack`. If that
 ever goes red, the project is lying about its core claim.
+
+`internal/e2e` goes one level up: it loads the recipe files exactly as shipped
+and runs them against fixture repositories. Go recipes use the real toolchain;
+recipes that need credentials or a network get POSIX shell stand-ins on `PATH`
+that emit the real tools' JSON and make the real fixers' edits. A recipe, a
+parser and the engine can each be correct and still disagree — this is where
+that shows up.

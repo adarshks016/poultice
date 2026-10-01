@@ -1,0 +1,42 @@
+apiVersion: poultice.dev/v1
+kind: Recipe
+
+metadata:
+  name: go-mod-tidy
+  ecosystem: go
+  summary: >
+    Keep go.mod and go.sum in step with the code: drop requirements nothing
+    imports and record the ones something does, then prove the module still
+    builds and its tests still pass.
+
+detect:
+  files:
+    - go.mod
+  requires:
+    - go
+
+diagnose:
+  # -diff (Go 1.23+) reports what tidy would change without writing anything.
+  # It exits 1 when the module is untidy; the parser tells that apart from tidy
+  # itself failing, which is surfaced as an error rather than read as clean.
+  run: go mod tidy -diff
+  parse: go-mod-tidy-diff
+  expectNonZeroExit: true
+  timeoutSeconds: 300
+
+fix:
+  # Tidy is fully deterministic, so there is deliberately no AI strategy: if
+  # tidy cannot resolve the module graph, a model guessing at go.mod will not
+  # either, and a human needs to see the error.
+  - strategy: native
+    name: go-mod-tidy
+    run: go mod tidy
+    timeoutSeconds: 300
+
+verify:
+  - name: build
+    run: go build ./...
+    timeoutSeconds: 600
+  - name: test
+    run: go test ./...
+    timeoutSeconds: 900

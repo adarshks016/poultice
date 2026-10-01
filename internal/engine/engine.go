@@ -340,6 +340,12 @@ func (e *Engine) settle(
 	commitMsg string,
 ) (accepted bool, rejection string, verdict *model.Verdict) {
 	if isGit {
+		// The index becomes the exact snapshot that policy measures and that a
+		// passing verdict commits. Anything verify writes after this point is a
+		// byproduct: it is discarded, never committed unchecked.
+		if err := e.repo.StageAll(ctx); err != nil {
+			return false, "stage changes: " + err.Error(), nil
+		}
 		changed, err := e.repo.ChangedFiles(ctx)
 		if err != nil {
 			return false, "inspect changes: " + err.Error(), nil
@@ -376,7 +382,12 @@ func (e *Engine) settle(
 	e.opts.logf("verify: passed")
 	if isGit {
 		if _, err := e.repo.Checkpoint(ctx, commitMsg); err != nil {
+			e.rollbackTo(ctx, isGit)
 			return false, "checkpoint: " + err.Error(), verdict
+		}
+		if clean, err := e.repo.IsClean(ctx); err == nil && !clean {
+			e.opts.logf("verify: discarding files the verifier wrote")
+			e.rollbackTo(ctx, isGit)
 		}
 	}
 	return true, "", verdict

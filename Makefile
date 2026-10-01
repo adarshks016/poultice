@@ -19,6 +19,10 @@ install: ## Install poultice into GOBIN
 test: ## Run the test suite
 	go test ./...
 
+.PHONY: e2e
+e2e: ## Run the shipped recipes against fixture repositories
+	go test ./internal/e2e/ -v
+
 .PHONY: race
 race: ## Run tests with the race detector
 	go test -race ./...

@@ -1,0 +1,31 @@
+#!/bin/sh
+# Stand-in for ruff. Reports an unused `import os` as F401 in ruff's real JSON
+# shape (with a safe fix), and `ruff check --fix` deletes the import.
+set -eu
+
+files=$(grep -rl --include='*.py' '^import os$' . 2>/dev/null || true)
+
+case " $* " in
+*" --fix "*)
+	for f in $files; do
+		grep -v '^import os$' "$f" >"$f.next" || true
+		mv "$f.next" "$f"
+	done
+	exit 0
+	;;
+esac
+
+if [ -z "$files" ]; then
+	echo '[]'
+	exit 0
+fi
+printf '['
+sep=''
+for f in $files; do
+	row=$(grep -n '^import os$' "$f" | head -n 1 | cut -d: -f1)
+	printf '%s{"code":"F401","message":"`os` imported but unused","filename":"%s","location":{"row":%s,"column":8},"fix":{"applicability":"safe"}}' \
+		"$sep" "${f#./}" "$row"
+	sep=','
+done
+printf ']\n'
+exit 1

@@ -1,0 +1,16 @@
+package demo;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import org.junit.jupiter.api.Test;
+
+// A suite that pins the exact dependency version. The CVE upgrade is correct,
+// but this project's own tests reject it, so poultice must not keep it.
+class VersionPinTest {
+    static final String PINNED_LOG4J = "2.14.1";
+
+    @Test
+    void log4jIsPinned() {
+        assertEquals(PINNED_LOG4J, org.apache.logging.log4j.core.Version.class.getPackage().getImplementationVersion());
+    }
+}

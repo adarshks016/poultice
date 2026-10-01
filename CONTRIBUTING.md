@@ -58,7 +58,12 @@ commit.
 ```bash
 go test ./...
 go test ./internal/engine/ -run TestFailedVerificationRollsBack -v
+make e2e        # shipped recipes against fixture repositories
 ```
+
+A new recipe should come with an end-to-end case in `internal/e2e`: a fixture
+under `testdata/fixtures/` (every file suffixed `.tmpl`) and, if the tool needs
+credentials or a network, a shell stand-in under `testdata/stubs/`.
 
 ## Commits and pull requests
 

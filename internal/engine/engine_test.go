@@ -180,6 +180,36 @@ func TestFailedVerificationRollsBack(t *testing.T) {
 	}
 }
 
+// Verify steps routinely write files (bytecode caches, build output, logs).
+// Those never passed policy, so they must not ride along in the checkpoint.
+func TestVerifierByproductsAreNotCommitted(t *testing.T) {
+	dir := newRepo(t)
+	src := strings.Replace(gofmtRecipe, "    run: go build ./...",
+		"    run: go build ./... && echo built > verify.log", 1)
+
+	eng := New(Options{RepoDir: dir, Severity: model.SeverityLow, NoAI: true})
+	rep, err := eng.Heal(context.Background(), mustRecipe(t, src))
+	if err != nil {
+		t.Fatalf("Heal: %v", err)
+	}
+	if rep.Outcome != model.OutcomeHealed {
+		t.Fatalf("outcome = %s, want healed (attempts: %+v)", rep.Outcome, rep.Attempts)
+	}
+
+	cmd := exec.Command("git", "show", "--name-only", "--format=", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "demo.go" {
+		t.Errorf("checkpoint contains %q, want only demo.go", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "verify.log")); !os.IsNotExist(err) {
+		t.Error("verifier byproduct was left in the working tree")
+	}
+}
+
 func TestCleanRepoProducesNoWork(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "go.mod", "module demo\n\ngo 1.22\n")

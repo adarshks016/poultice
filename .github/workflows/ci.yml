@@ -65,3 +65,25 @@ jobs:
       # exits non-zero and fails this job.
       - name: heal (deterministic only)
         run: ./bin/poultice heal --severity low --no-ai
+
+  action:
+    name: action.yml heals poultice
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: check
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The action exactly as users consume it, pointed at this repository.
+      - uses: ./
+        id: poultice
+        with:
+          severity: low
+          no-ai: true
+          go-version: stable
+
+      - name: outcome is clean
+        env:
+          OUTCOME: ${{ steps.poultice.outputs.outcome }}
+        run: test "$OUTCOME" = clean

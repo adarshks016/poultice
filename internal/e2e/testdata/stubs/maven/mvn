@@ -1,0 +1,23 @@
+#!/bin/sh
+# Stand-in for Maven. Every build "compiles"; the test phase fails when a test
+# pins a log4j version that pom.xml no longer declares, which is the shape of a
+# real upgrade breaking a real suite.
+set -eu
+
+case " $* " in
+*" test "*) ;;
+*)
+	echo "[INFO] BUILD SUCCESS"
+	exit 0
+	;;
+esac
+
+pinned=$(grep -rho 'PINNED_LOG4J = "[^"]*"' src 2>/dev/null | head -n 1 | sed 's/.*"\(.*\)"/\1/' || true)
+if [ -n "$pinned" ] && ! grep -q "<version>$pinned</version>" pom.xml; then
+	echo "[ERROR] VersionPinTest.log4jIsPinned: expected log4j-core $pinned"
+	echo "[ERROR] Tests run: 1, Failures: 1"
+	echo "[INFO] BUILD FAILURE"
+	exit 1
+fi
+echo "[INFO] Tests run: 1, Failures: 0"
+echo "[INFO] BUILD SUCCESS"

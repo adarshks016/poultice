@@ -3,6 +3,9 @@
 A recipe teaches poultice to heal one class of problem in one ecosystem. Most
 are 30–50 lines of YAML and need no Go code at all.
 
+This is the reference. For a step-by-step tutorial that builds a shipped
+recipe from scratch, start with [first-recipe.md](first-recipe.md).
+
 Validate as you go:
 
 ```bash
@@ -24,8 +27,10 @@ metadata:
     One or two sentences. Shown in listings.
 
 detect:
-  files: ["**/*.py"]       # at least one glob must match
-  requires: [ruff]         # binaries that must be on PATH
+  files:                   # at least one glob must match
+    - "**/*.py"
+  requires:                # binaries that must be on PATH
+    - ruff
 
 diagnose:
   run: ruff check --output-format json .
@@ -59,6 +64,9 @@ anything. Some guidance:
   "the tests pass" — otherwise an assertion-free test suite verifies itself.
 - **Prefer deterministic steps.** A flaky verifier makes poultice roll back good
   fixes, which is annoying, and occasionally accept bad ones, which is worse.
+- **Byproducts are discarded.** Files a verify step writes (`__pycache__/`,
+  `target/`, logs) are never committed. A checkpoint contains exactly the
+  strategy's changes that passed policy.
 
 ## Strategies
 
@@ -88,11 +96,14 @@ them. Requires `policy.allowPaths`; the loader rejects an unbounded AI strategy.
     name: residual-fixes
     maxAttempts: 2
     context:
-      include: ["**/*.py"]
+      include:
+        - "**/*.py"
       maxBytes: 40000
     policy:
-      allowPaths: ["**/*.py"]
-      denyPaths: ["**/migrations/**"]
+      allowPaths:
+        - "**/*.py"
+      denyPaths:
+        - "**/migrations/**"
       maxChangedFiles: 5
       maxChangedLines: 200
 ```
@@ -128,8 +139,13 @@ A healer that can rewrite its own CI configuration is not a healer.
 | `gofmt-list` | `gofmt -l` output |
 | `go-vet` | `go vet` diagnostics |
 | `go-build` | Go compiler errors |
+| `go-mod-tidy-diff` | `go mod tidy -diff` (Go 1.23+) |
+| `govulncheck-json` | `govulncheck -json`, reachable vulnerabilities only |
 | `ruff-json` | `ruff check --output-format json` |
 | `snyk-json` | `snyk test --json`, both object and array shapes |
+| `npm-audit-json` | `npm audit --json`, npm 6 and npm 7+ shapes |
+| `semgrep-json` | `semgrep --json` |
+| `cargo-audit-json` | `cargo audit --json` |
 
 `poultice recipes` prints the current list.
 
@@ -158,7 +174,9 @@ func parseMyTool(in Input) (model.Findings, error) {
 ```
 
 Set `NativelyFixable` honestly — the engine uses it to decide whether spending
-model tokens is worth it at all.
+model tokens is worth it at all. When the tool fails rather than reports,
+return an error: an empty finding list means "healthy", and a parser that
+returns one for a crashed tool hides the crash.
 
 ## The YAML subset
 
@@ -167,8 +185,9 @@ that holds repository write access. It supports mappings, sequences, sequences
 of mappings, block scalars (`|` and `>`), quoted scalars and comments.
 
 It does **not** support anchors and aliases, multiple documents, or inline flow
-collections other than `[]` and `{}`. These are rejected with a line number
-rather than silently misread. If you hit that limit, the recipe is probably
+collections other than `[]` and `{}` — write `files:` followed by `- item`
+lines, never `files: [a, b]`. These are rejected with a line number rather than
+silently misread. If you hit that limit, the recipe is probably
 trying to be a program — which is what strategies are for.
 
 ## Checklist
@@ -179,3 +198,4 @@ trying to be a program — which is what strategies are for.
 - [ ] A native strategy exists if the tool has any autofix
 - [ ] Any AI strategy has the tightest `allowPaths` that can still work
 - [ ] Timeouts are set for anything slower than a few seconds
+- [ ] An end-to-end fixture in `internal/e2e` exercises it as shipped

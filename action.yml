@@ -1,5 +1,5 @@
-name: Poultice
-description: Diagnose and heal repository issues — only keep changes that a verifier can prove.
+name: poultice
+description: Heal a repository with verification-gated fixes — keep only what the build can prove.
 author: adarshks016
 
 branding:
@@ -8,110 +8,159 @@ branding:
 
 inputs:
   recipe:
-    description: Run only this named recipe (default is all applicable).
+    description: Run only these recipes, comma-separated. Default is every recipe that applies.
+    required: false
+    default: ''
+  skip:
+    description: Never run these recipes, comma-separated.
     required: false
     default: ''
   severity:
-    description: Minimum finding severity to act on (low|medium|high|critical).
+    description: Minimum severity to act on (low|medium|high|critical). Default comes from .poultice.yaml, else high.
     required: false
-    default: high
+    default: ''
   no-ai:
     description: Deterministic strategies only; never call a model.
     required: false
     default: 'false'
   dry-run:
-    description: Diagnose and report findings; apply no changes.
+    description: Diagnose and report; change nothing.
     required: false
     default: 'false'
   recipes-dir:
-    description: Path to the recipes directory relative to the workspace (default ./recipes).
+    description: Recipe directory relative to working-directory, or "builtin". Default is ./recipes when present, else the recipes bundled with this action version.
     required: false
     default: ''
+  working-directory:
+    description: Repository root to heal.
+    required: false
+    default: '.'
+  fail-on:
+    description: 'Fail the step at this outcome or worse: partial | unverified | failed | never.'
+    required: false
+    default: partial
   anthropic-api-key:
-    description: Anthropic API key that enables the AI fix path (Claude provider).
+    description: Enables the AI fix path. Pass a secret, never a literal.
     required: false
     default: ''
   go-version:
-    description: Minimum Go version used to install poultice.
+    description: Go toolchain used to build poultice. Default reuses the runner's Go when present, else installs stable.
     required: false
-    default: '>=1.22'
+    default: ''
 
 outputs:
   outcome:
-    description: 'Healing outcome: clean | healed | partial | unverified | failed'
+    description: 'clean | healed | partial | unverified | failed'
     value: ${{ steps.heal.outputs.outcome }}
+  exit-code:
+    description: poultice's exit code (0 clean/healed, 2 partial, 3 unverified, 1 failed).
+    value: ${{ steps.heal.outputs.exit-code }}
+  report:
+    description: Path to the JSON report.
+    value: ${{ steps.heal.outputs.report }}
   pr-body:
-    description: Markdown pull-request body summarising what was healed (empty when nothing changed).
-    value: ${{ steps.pr-body.outputs.text }}
+    description: Markdown pull request body describing what was healed.
+    value: ${{ steps.heal.outputs.pr-body }}
 
 runs:
   using: composite
   steps:
+    - name: Detect Go
+      id: go
+      shell: bash
+      run: |
+        if command -v go >/dev/null 2>&1; then
+          echo "present=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "present=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Set up Go
+      if: inputs.go-version != '' || steps.go.outputs.present != 'true'
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ inputs.go-version }}
+        go-version: ${{ inputs.go-version || 'stable' }}
+        cache: false
 
-    - name: Install poultice
+    # Built from this action's own checkout, so `uses: adarshks016/poultice@vX`
+    # runs exactly version X, with exactly that version's recipes embedded.
+    - name: Build poultice
       shell: bash
-      run: go install github.com/adarshks016/poultice/cmd/poultice@latest
+      working-directory: ${{ github.action_path }}
+      env:
+        GOFLAGS: ''
+        GOWORK: 'off'
+        ACTION_REF: ${{ github.action_ref }}
+      run: |
+        go build -trimpath -ldflags "-s -w -X main.version=${ACTION_REF:-action}" \
+          -o "$RUNNER_TEMP/poultice/bin/poultice" ./cmd/poultice
 
     - name: Heal
       id: heal
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      # Inputs travel through the environment, never through ${{ }} in the
+      # script body, so no input value can be executed as shell.
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        IN_RECIPE: ${{ inputs.recipe }}
+        IN_SKIP: ${{ inputs.skip }}
+        IN_SEVERITY: ${{ inputs.severity }}
+        IN_NO_AI: ${{ inputs.no-ai }}
+        IN_DRY_RUN: ${{ inputs.dry-run }}
+        IN_RECIPES_DIR: ${{ inputs.recipes-dir }}
+        IN_FAIL_ON: ${{ inputs.fail-on }}
       run: |
-        args=(heal --severity "${{ inputs.severity }}")
+        rank() {
+          case "$1" in
+            clean) echo 0 ;; healed) echo 1 ;; partial) echo 2 ;;
+            unverified) echo 3 ;; failed) echo 4 ;; never) echo 99 ;; *) echo -1 ;;
+          esac
+        }
+        threshold=$(rank "$IN_FAIL_ON")
+        if [[ "$threshold" -lt 2 ]]; then
+          echo "::error::fail-on must be one of partial, unverified, failed, never (got '$IN_FAIL_ON')"
+          exit 1
+        fi
 
-        [[ -n "${{ inputs.recipe }}" ]]      && args+=(--recipe "${{ inputs.recipe }}")
-        [[ -n "${{ inputs.recipes-dir }}" ]] && args+=(--recipes "${{ inputs.recipes-dir }}")
-        [[ "${{ inputs.no-ai }}"  == "true" ]] && args+=(--no-ai)
-        [[ "${{ inputs.dry-run }}" == "true" ]] && args+=(--dry-run)
+        out="$RUNNER_TEMP/poultice"
+        report="$out/report.json"
+        pr_body="$out/pr-body.md"
+        rm -f "$report" "$pr_body"
 
-        json_file=$(mktemp)
-        pr_body_file=$(mktemp)
-        args+=(--json --pr-body "$pr_body_file")
+        args=(heal --json --pr-body "$pr_body")
+        if [[ -n "$IN_SEVERITY" ]];    then args+=(--severity "$IN_SEVERITY"); fi
+        if [[ -n "$IN_RECIPE" ]];      then args+=(--recipe "$IN_RECIPE"); fi
+        if [[ -n "$IN_SKIP" ]];        then args+=(--skip "$IN_SKIP"); fi
+        if [[ -n "$IN_RECIPES_DIR" ]]; then args+=(--recipes "$IN_RECIPES_DIR"); fi
+        if [[ "$IN_NO_AI" == "true" ]];   then args+=(--no-ai); fi
+        if [[ "$IN_DRY_RUN" == "true" ]]; then args+=(--dry-run); fi
 
         set +e
-        poultice "${args[@]}" > "$json_file"
-        exit_code=$?
+        "$out/bin/poultice" "${args[@]}" > "$report"
+        code=$?
         set -e
 
-        # Map exit code to a human-readable outcome string.
-        # Exit 0 covers both OutcomeClean and OutcomeHealed; parse the JSON to
-        # distinguish them when the report is available.
-        case $exit_code in
-          0)
-            outcome=$(python3 -c \
-              "import json,sys; d=json.load(open('$json_file')); print(d.get('outcome','clean'))" \
-              2>/dev/null || echo "clean")
-            ;;
-          2) outcome="partial"    ;;
-          3) outcome="unverified" ;;
-          *) outcome="failed"     ;;
-        esac
+        # The report is indented JSON whose only two-space-indented "outcome"
+        # key is the top-level one.
+        outcome=$(sed -n 's/^  "outcome": "\([a-z]*\)",$/\1/p' "$report" | head -n 1)
+        if [[ "$code" -eq 1 || -z "$outcome" ]]; then outcome=failed; fi
+        echo "poultice: $outcome (exit $code)"
 
-        echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+        {
+          echo "outcome=$outcome"
+          echo "exit-code=$code"
+          echo "report=$report"
+          if [[ -s "$pr_body" ]]; then
+            delim="POULTICE_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+            echo "pr-body<<$delim"
+            cat "$pr_body"
+            echo "$delim"
+          fi
+        } >> "$GITHUB_OUTPUT"
+        if [[ -s "$pr_body" ]]; then cat "$pr_body" >> "$GITHUB_STEP_SUMMARY"; fi
 
-        # Stash the PR body path for the next step.
-        echo "pr_body_file=$pr_body_file" >> "$GITHUB_ENV"
-
-        rm -f "$json_file"
-        exit $exit_code
-
-    - name: Collect PR body
-      id: pr-body
-      if: always()
-      shell: bash
-      run: |
-        if [[ -s "$pr_body_file" ]]; then
-          {
-            echo "text<<POULTICE_EOF"
-            cat "$pr_body_file"
-            echo "POULTICE_EOF"
-          } >> "$GITHUB_OUTPUT"
-        else
-          echo "text=" >> "$GITHUB_OUTPUT"
+        if [[ "$(rank "$outcome")" -ge "$threshold" ]]; then
+          echo "::error::poultice outcome is '$outcome' (fail-on: $IN_FAIL_ON)"
+          exit 1
         fi
-        rm -f "$pr_body_file"

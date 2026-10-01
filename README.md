@@ -47,6 +47,10 @@ failure modes that approach always has:
 go install github.com/adarshks016/poultice/cmd/poultice@latest
 ```
 
+The recipe library is compiled into the binary, so this is all you need in any
+repository. Pre-built binaries for Linux, macOS and Windows are attached to
+each [GitHub release](https://github.com/adarshks016/poultice/releases).
+
 Or build from source — poultice has **zero third-party dependencies**, so this
 works offline with nothing but a Go toolchain:
 
@@ -99,8 +103,11 @@ metadata:
   ecosystem: java
 
 detect:
-  files: ["**/pom.xml"]
-  requires: [mvn, snyk]
+  files:
+    - "**/pom.xml"
+  requires:
+    - mvn
+    - snyk
 
 diagnose:
   run: snyk test --all-projects --json-file-output=$POULTICE_OUT
@@ -115,7 +122,8 @@ fix:
   - strategy: ai                # only sees what native could not fix
     name: unfixable-dependency-bumps
     policy:
-      allowPaths: ["**/pom.xml"]    # a dep CVE is fixed in a pom, never in sources
+      allowPaths:                 # a dep CVE is fixed in a pom, never in sources
+        - "**/pom.xml"
       maxChangedFiles: 10
       maxChangedLines: 200
 
@@ -133,8 +141,63 @@ Two rules are enforced by the loader, not by convention:
 2. **Native strategies must precede AI strategies.** Cheap and deterministic
    before expensive and probabilistic.
 
-Shipped recipes live in [`recipes/`](recipes/): `go-formatting`, `python-ruff`,
-`maven-snyk-cve`. Writing your own is [documented here](docs/writing-recipes.md).
+### Shipped recipes
+
+| Recipe | Ecosystem | Diagnose | Fix |
+|---|---|---|---|
+| `go-formatting` | Go | `gofmt -l` | `gofmt -w` |
+| `go-mod-tidy` | Go | `go mod tidy -diff` | `go mod tidy` |
+| `go-vuln` | Go | `govulncheck` | `go get -u`, then AI |
+| `maven-snyk-cve` | Java | Snyk | `snyk fix`, then AI (`pom.xml` only) |
+| `gradle-snyk-cve` | Java | Snyk | AI (build files only) |
+| `npm-vuln` | Node | `npm audit` | `npm audit fix`, then AI |
+| `python-ruff` | Python | `ruff check` | `ruff --fix`, then AI |
+| `cargo-vuln` | Rust | `cargo audit` | `cargo update`, then AI |
+| `semgrep` | multi | `semgrep` | `semgrep --autofix`, then AI |
+
+Each runs only where its `detect` block matches and its tools are installed;
+`poultice recipes` explains why any recipe was skipped. To write your own, start
+with the [first-recipe walkthrough](docs/first-recipe.md), then the
+[reference](docs/writing-recipes.md).
+
+## Configuration
+
+Flags work everywhere, and a `.poultice.yaml` at the repository root saves
+repeating them. `poultice init` writes a commented starter:
+
+```yaml
+severity: medium
+skip:
+  - semgrep
+noAI: true
+```
+
+Flags always override the file. See [docs/configuration.md](docs/configuration.md).
+
+## GitHub Action
+
+```yaml
+jobs:
+  heal:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: adarshks016/poultice@main   # pin a release tag in production
+        id: poultice
+        with:
+          severity: medium
+          no-ai: true                       # or: anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          fail-on: unverified               # partial | unverified | failed | never
+      - run: echo "outcome=${{ steps.poultice.outputs.outcome }}"
+```
+
+The action builds poultice from its own checkout, so a pinned tag runs exactly
+that version and its recipes. Outputs: `outcome`, `exit-code`, `report` (path
+to the JSON report) and `pr-body` (markdown, also written to the job summary).
+Healed changes are committed locally on the runner; push them or open a pull
+request with whatever tooling your workflow already uses.
 
 ## Exit codes
 
@@ -150,10 +213,17 @@ Poultice is built to be a CI gate, so the exit code is the contract:
 ## Safety properties
 
 These are tested, not aspirational — see
-[`internal/engine/engine_test.go`](internal/engine/engine_test.go).
+[`internal/engine/engine_test.go`](internal/engine/engine_test.go) and the
+end-to-end suite in [`internal/e2e`](internal/e2e/e2e_test.go), which runs the
+shipped recipes against fixture repositories.
 
 - **Nothing unverified survives.** Failed verification triggers `git reset --hard`
   to the last green commit plus `git clean -fd`.
+- **A checkpoint contains exactly what policy checked.** The strategy's changes
+  are staged, measured against policy, verified, and committed as that exact
+  snapshot. Anything the verifier writes — caches, build output, logs — is
+  discarded, never committed. Renames count against both their source and
+  destination, so a file cannot be moved out of a denied path.
 - **Your uncommitted work is never touched.** Poultice refuses to run on a dirty
   working tree rather than risk destroying changes it did not make.
 - **The AI can never edit CI config or secrets.** `.github/**`, `Jenkinsfile`,
@@ -163,35 +233,21 @@ These are tested, not aspirational — see
 - **`--no-ai` is a real mode.** Every deterministic strategy works with no model,
   no key and no network, which also makes poultice safe to run on fork PRs.
 
-## Status
+## AI fixes
 
-**v0.0.1.** The engine, recipe schema, policy enforcement, parsers, rollback and
-reporting are implemented and tested. The AI strategy path is fully wired through
-the engine — context collection, patch validation, policy checks, bounded
-retries — behind the `strategy.Patcher` interface.
-
-The first provider, **Anthropic (Claude)**, is now implemented. Set
-`ANTHROPIC_API_KEY` and `heal` will ask the model for a unified diff when native
-strategies leave findings behind; every generated patch still passes through
+Set `ANTHROPIC_API_KEY` and `heal` asks Claude for a unified diff whenever
+native strategies leave findings behind. Every generated patch still passes
 `git apply --check`, policy, and verification before it can survive. Without a
-key — or with `--no-ai` — the AI path reports `skipped: no AI provider configured`
-and the deterministic half runs unchanged. Optional overrides:
+key — or with `--no-ai` — the AI path reports `skipped: no AI provider
+configured` and the deterministic half runs unchanged. Optional overrides:
 `POULTICE_AI_MODEL` (default `claude-sonnet-5`) and `ANTHROPIC_BASE_URL`.
 
-### Roadmap
+## Status
 
-- [x] `strategy.Patcher` implementation: Anthropic (Claude)
-- [ ] Further `strategy.Patcher` implementations: OpenAI-compatible, Ollama
-- [ ] `poultice pr` — open the pull request directly, draft when unverified
-- [ ] SARIF output for GitHub code scanning ingestion
-- [ ] GitHub Action wrapper (`action.yml`) and a GitLab CI template
-- [ ] Finding-fingerprint state file, so a weekly schedule stops reopening the
-      same pull request
-- [ ] More recipes: flaky-test quarantine, `javax`→`jakarta` migration, Docker
-      base image bumps, CI hygiene
-- [ ] **Benchmark harness** — a fixture corpus of broken builds with a public
-      scoreboard: fix rate, false-positive rate, token cost per fix,
-      deterministic-vs-AI split
+Every item on the original roadmap has shipped: the engine, nine recipes and
+ten parsers, the Anthropic provider, the config file, the GitHub Action, release
+automation, and an end-to-end suite over the shipped recipes. What comes next is
+in [ROADMAP.md](ROADMAP.md).
 
 ## Contributing
 

@@ -1,0 +1,64 @@
+apiVersion: poultice.dev/v1
+kind: Recipe
+
+metadata:
+  name: gradle-snyk-cve
+  ecosystem: java
+  summary: >
+    Remediate Snyk-reported CVEs in Gradle builds by bumping the affected
+    dependency declarations, then prove the build still assembles and its tests
+    still pass through the project's own Gradle wrapper.
+
+detect:
+  files:
+    - "**/build.gradle"
+    - "**/build.gradle.kts"
+  requires:
+    - snyk
+
+diagnose:
+  # Same scanner and parser as maven-snyk-cve: Snyk resolves the Gradle graph
+  # itself and reports the same JSON shape for every build tool.
+  run: snyk test --all-projects --json-file-output=$POULTICE_OUT
+  parse: snyk-json
+  expectNonZeroExit: true
+  timeoutSeconds: 1800
+
+fix:
+  # Gradle has no deterministic upgrade command and `snyk fix` does not support
+  # it, so this recipe is AI-only. With --no-ai it diagnoses and reports, which
+  # is still a useful CI gate.
+  - strategy: ai
+    name: gradle-dependency-bumps
+    maxAttempts: 2
+    context:
+      include:
+        - "**/build.gradle"
+        - "**/build.gradle.kts"
+        - "gradle/libs.versions.toml"
+        - "**/gradle.lockfile"
+      maxBytes: 60000
+    policy:
+      # A dependency CVE is fixed in the build files or the version catalog,
+      # never in sources. Anything else the model proposes is rejected.
+      allowPaths:
+        - "**/build.gradle"
+        - "**/build.gradle.kts"
+        - "gradle/libs.versions.toml"
+        - "**/gradle.lockfile"
+      denyPaths:
+        - "gradle/wrapper/**"
+        - "**/settings.gradle"
+        - "**/settings.gradle.kts"
+      maxChangedFiles: 10
+      maxChangedLines: 200
+
+# The wrapper pins the Gradle version the project actually builds with. A repo
+# without one fails verification, and poultice rolls back rather than guess.
+verify:
+  - name: assemble
+    run: ./gradlew --no-daemon -q assemble
+    timeoutSeconds: 2400
+  - name: test
+    run: ./gradlew --no-daemon test
+    timeoutSeconds: 3600

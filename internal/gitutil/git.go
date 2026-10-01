@@ -66,30 +66,50 @@ func (r *Repo) IsClean(ctx context.Context) (bool, error) {
 }
 
 // ChangedFiles lists paths modified relative to HEAD, including untracked ones.
+// A rename or copy contributes both its source and destination: moving a file
+// out of a denied path is as much a change to that path as editing it.
 func (r *Repo) ChangedFiles(ctx context.Context) ([]string, error) {
-	res, err := r.git(ctx, "status --porcelain=v1 --untracked-files=all")
+	res, err := r.git(ctx, "status --porcelain=v1 -z --untracked-files=all")
 	if err != nil {
 		return nil, err
 	}
 	if !res.Success() {
 		return nil, fmt.Errorf("git status: %s", strings.TrimSpace(res.Output))
 	}
-	var out []string
-	for _, line := range strings.Split(res.Output, "\n") {
-		if len(line) < 4 {
+	return parsePorcelainZ(res.Output), nil
+}
+
+// parsePorcelainZ reads `git status --porcelain=v1 -z`: NUL-terminated
+// "XY path" entries, unquoted, where a rename or copy is followed by a second
+// entry holding the original path.
+func parsePorcelainZ(out string) []string {
+	var paths []string
+	entries := strings.Split(out, "\x00")
+	for i := 0; i < len(entries); i++ {
+		e := entries[i]
+		if len(e) < 4 || e[2] != ' ' {
 			continue
 		}
-		// Porcelain v1 format: XY<space>path, with renames as "old -> new".
-		path := strings.TrimSpace(line[3:])
-		if i := strings.Index(path, " -> "); i >= 0 {
-			path = path[i+4:]
-		}
-		path = strings.Trim(path, `"`)
-		if path != "" {
-			out = append(out, path)
+		paths = append(paths, e[3:])
+		if (e[0] == 'R' || e[0] == 'C') && i+1 < len(entries) && entries[i+1] != "" {
+			i++
+			paths = append(paths, entries[i])
 		}
 	}
-	return out, nil
+	return paths
+}
+
+// StageAll stages every change, tracked or untracked. The engine uses the
+// index as the exact snapshot that policy measures and Checkpoint commits.
+func (r *Repo) StageAll(ctx context.Context) error {
+	res, err := r.git(ctx, "add --all")
+	if err != nil {
+		return err
+	}
+	if !res.Success() {
+		return fmt.Errorf("git add: %s", strings.TrimSpace(res.Output))
+	}
+	return nil
 }
 
 // DiffStat returns the number of changed files and changed lines against HEAD,
@@ -134,13 +154,12 @@ func atoiSafe(s string) int {
 	return n
 }
 
-// Checkpoint commits the current working tree state and returns the new SHA.
-// Checkpoints are ordinary commits so that the resulting branch reads as a
-// reviewable history rather than one opaque squash.
+// Checkpoint commits the index exactly as staged and returns the new SHA. It
+// deliberately does not stage anything itself: what gets committed is the
+// snapshot the caller already measured, not whatever has appeared in the
+// working tree since. Checkpoints are ordinary commits so that the resulting
+// branch reads as a reviewable history rather than one opaque squash.
 func (r *Repo) Checkpoint(ctx context.Context, message string) (string, error) {
-	if _, err := r.git(ctx, "add --all"); err != nil {
-		return "", err
-	}
 	staged, err := r.git(ctx, "diff --cached --quiet")
 	if err != nil {
 		return "", err

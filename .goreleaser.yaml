@@ -36,7 +36,7 @@ archives:
       - README.md
       - LICENSE
       - NOTICE
-      - recipes/**
+      - recipes/*.yaml
 
 checksum:
   name_template: '{{ .ProjectName }}_{{ .Version }}_checksums.txt'

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Stand-in for the interpreter the python-ruff verify block calls. The "test
+# suite" passes while app.py still defines add(), so a fix that deleted real
+# code would fail verification.
+set -eu
+
+case "$*" in
+"-m compileall -q .")
+	exit 0
+	;;
+"-m pytest -q")
+	if grep -q '^def add(' app.py; then
+		echo "1 passed"
+		exit 0
+	fi
+	echo "FAILED test_app.py::test_add - ImportError: cannot import name 'add'"
+	exit 1
+	;;
+esac
+echo "python stub: unsupported arguments: $*" >&2
+exit 2

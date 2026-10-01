@@ -1,0 +1,32 @@
+#!/bin/sh
+# Stand-in for the Snyk CLI. Reports Log4Shell while pom.xml pins log4j-core
+# 2.14.1, in Snyk's real JSON shape, and `snyk fix` makes the same upgrade the
+# real fixer would: 2.14.1 -> 2.17.1.
+set -eu
+
+case "${1:-}" in
+test)
+	out=""
+	for arg in "$@"; do
+		case "$arg" in --json-file-output=*) out="${arg#--json-file-output=}" ;; esac
+	done
+	if grep -q '<version>2.14.1</version>' pom.xml; then
+		report='{"displayTargetFile":"pom.xml","vulnerabilities":[{"id":"SNYK-JAVA-ORGAPACHELOGGINGLOG4J-2314720","title":"Remote Code Execution (Log4Shell)","severity":"critical","packageName":"org.apache.logging.log4j:log4j-core","version":"2.14.1","isUpgradable":true,"isPatchable":false,"fixedIn":["2.17.1"]}]}'
+		status=1
+	else
+		report='{"displayTargetFile":"pom.xml","vulnerabilities":[]}'
+		status=0
+	fi
+	if [ -n "$out" ]; then printf '%s\n' "$report" >"$out"; else printf '%s\n' "$report"; fi
+	exit "$status"
+	;;
+fix)
+	sed 's#<version>2.14.1</version>#<version>2.17.1</version>#' pom.xml >pom.xml.next
+	mv pom.xml.next pom.xml
+	echo "Successful fixes: pom.xml upgraded log4j-core 2.14.1 -> 2.17.1"
+	;;
+*)
+	echo "snyk stub: unsupported command: $*" >&2
+	exit 2
+	;;
+esac
