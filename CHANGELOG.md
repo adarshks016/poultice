@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-01
+
 ### Added
 - `.poultice.yaml` configuration (`severity`, `recipesDir`, `only`, `skip`,
   `noAI`, `prBody`, `ai.model`), discovered at the repository root or named
@@ -86,5 +88,6 @@ and reports `skipped: no AI provider configured`.
 - Three starter recipes: Go formatting, Maven Snyk CVE remediation, Python ruff.
 - CI workflow with a dogfood job that runs poultice against its own source.
 
-[Unreleased]: https://github.com/adarshks016/poultice/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/adarshks016/poultice/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/adarshks016/poultice/releases/tag/v0.1.0
 [0.0.1]: https://github.com/adarshks016/poultice/releases/tag/v0.0.1
